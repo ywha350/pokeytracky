@@ -383,11 +383,12 @@ function updateAnimatedNumberElements() {
     if (!element) {
       return;
     }
+    const shouldShowDirection = key.startsWith('player-');
 
     element.textContent = formatNumber(entry.value);
     element.classList.toggle('value-animating', entry.animating);
-    element.classList.toggle('value-increasing', entry.animating && entry.direction > 0);
-    element.classList.toggle('value-decreasing', entry.animating && entry.direction < 0);
+    element.classList.toggle('value-increasing', shouldShowDirection && entry.animating && entry.direction > 0);
+    element.classList.toggle('value-decreasing', shouldShowDirection && entry.animating && entry.direction < 0);
   });
 }
 
