@@ -1,7 +1,7 @@
 ﻿import './style.css';
 
-const ANTE = 1;
-const INITIAL_STACK = 200;
+const DEFAULT_ENTRY_FEE = 1;
+const DEFAULT_STARTING_STACK = 200;
 const MIN_OPEN_BET = 1;
 const VALUE_ANIMATION_DURATION = 420;
 const chipOptions = [
@@ -180,12 +180,12 @@ function queueMoneySound(type) {
 }
 
 function createPlayer() {
-  return { stack: INITIAL_STACK, handBet: 0, streetBet: 0, folded: false, acted: false };
+  return { stack: state.settings.startingStack, handBet: 0, streetBet: 0, folded: false, acted: false };
 }
 
 function normalizePlayer(player = {}) {
   return {
-    stack: Number.isFinite(player.stack) ? player.stack : INITIAL_STACK,
+    stack: Number.isFinite(player.stack) ? player.stack : state.settings.startingStack,
     handBet: Number.isFinite(player.handBet) ? player.handBet : 0,
     streetBet: Number.isFinite(player.streetBet) ? player.streetBet : 0,
     folded: Boolean(player.folded),
@@ -199,6 +199,7 @@ function getChipOptionByValue(value) {
 
 function serializeState() {
   return {
+    settings: { ...state.settings },
     players: state.players.map((player) => ({ ...player })),
     activePlayer: state.activePlayer,
     handOver: state.handOver,
@@ -211,6 +212,8 @@ function hydrateState(snapshot) {
   if (!snapshot || !Array.isArray(snapshot.players) || snapshot.players.length !== state.players.length) {
     return false;
   }
+
+  state.settings = normalizeSettings(snapshot.settings);
 
   state.players = snapshot.players.map((player) => normalizePlayer(player));
   state.activePlayer = Number.isInteger(snapshot.activePlayer) ? snapshot.activePlayer : 0;
@@ -296,10 +299,21 @@ function queuePersistGameState() {
   });
 }
 
+function normalizeSettings(settings = {}) {
+  const startingStack = Number.isFinite(settings.startingStack) ? Math.max(1, Math.floor(settings.startingStack)) : DEFAULT_STARTING_STACK;
+  const entryFee = Number.isFinite(settings.entryFee) ? Math.max(0, Math.floor(settings.entryFee)) : DEFAULT_ENTRY_FEE;
+
+  return {
+    startingStack,
+    entryFee: Math.min(entryFee, startingStack),
+  };
+}
+
 const state = {
+  settings: normalizeSettings(),
   players: [
-    createPlayer(),
-    createPlayer(),
+    { stack: DEFAULT_STARTING_STACK, handBet: 0, streetBet: 0, folded: false, acted: false },
+    { stack: DEFAULT_STARTING_STACK, handBet: 0, streetBet: 0, folded: false, acted: false },
   ],
   activePlayer: 0,
   handOver: false,
@@ -499,7 +513,7 @@ function isBettingClosed() {
 }
 
 function getPostedAnte(player) {
-  return Math.min(player.stack, ANTE);
+  return Math.min(player.stack, state.settings.entryFee);
 }
 
 function maybeEndHand() {
@@ -752,6 +766,46 @@ function resetGame() {
   render();
 }
 
+function promptForPositiveWholeNumber(message, initialValue, minimum = 0) {
+  const input = window.prompt(message, `${initialValue}`);
+  if (input === null) {
+    return null;
+  }
+
+  const value = Number(input.trim());
+  if (!Number.isInteger(value) || value < minimum) {
+    window.alert(`Enter a whole number of at least ${minimum}.`);
+    return null;
+  }
+
+  return value;
+}
+
+function openSettings() {
+  const nextStartingStack = promptForPositiveWholeNumber('Starting stack per player', state.settings.startingStack, 1);
+  if (nextStartingStack === null) {
+    return;
+  }
+
+  const nextEntryFee = promptForPositiveWholeNumber('Entry fee (ante) per hand', state.settings.entryFee, 0);
+  if (nextEntryFee === null) {
+    return;
+  }
+
+  if (nextEntryFee > nextStartingStack) {
+    window.alert('Entry fee cannot be greater than the starting stack.');
+    return;
+  }
+
+  state.settings = normalizeSettings({
+    startingStack: nextStartingStack,
+    entryFee: nextEntryFee,
+  });
+  state.players = state.players.map(() => createPlayer());
+  startNextHand();
+  render();
+}
+
 function render() {
   const app = document.querySelector('#app');
   const currentBet = getCurrentBet();
@@ -841,11 +895,13 @@ function render() {
       </section>
 
       <footer class="game-footer">
+        <button class="footer-reset-button" id="open-settings">Settings</button>
         <button class="footer-reset-button" id="reset-game">Reset Game</button>
       </footer>
     </main>
   `;
 
+  bindButtonSound('#open-settings', openSettings);
   bindButtonSound('#reset-hand', resetHand);
   bindButtonSound('#reset-game', resetGame);
   bindButtonSound('#next-street', nextStreet);
