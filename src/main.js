@@ -17,6 +17,7 @@ const animatedNumberState = {
 const GAME_DB_NAME = 'pokeytracky-db';
 const GAME_STORE_NAME = 'game_state';
 const GAME_STATE_KEY = 'current';
+const PICKUP_COIN_SOUND_URL = `${import.meta.env.BASE_URL}pickupCoin%20(1).wav`;
 let gameDbPromise = null;
 let persistWritePromise = Promise.resolve();
 let persistQueued = false;
@@ -24,6 +25,7 @@ let hasHydratedState = false;
 let audioContext = null;
 let audioUnlocked = false;
 let lastMoneySignature = null;
+let pendingMoneySound = null;
 
 function getAudioContext() {
   if (!window.AudioContext && !window.webkitAudioContext) {
@@ -119,6 +121,12 @@ function playMoneySound() {
   });
 }
 
+function playPickupCoinSound() {
+  const sound = new Audio(PICKUP_COIN_SOUND_URL);
+  sound.volume = 0.72;
+  sound.play().catch(() => {});
+}
+
 function playWinnerSound() {
   [
     { frequency: 523.25, startTime: 0, duration: 0.16 },
@@ -157,9 +165,18 @@ function syncMoneySound() {
   }
 
   if (signature !== lastMoneySignature) {
-    playMoneySound();
+    if (pendingMoneySound === 'pickup') {
+      playPickupCoinSound();
+    } else {
+      playMoneySound();
+    }
+    pendingMoneySound = null;
     lastMoneySignature = signature;
   }
+}
+
+function queueMoneySound(type) {
+  pendingMoneySound = type;
 }
 
 function createPlayer() {
@@ -658,6 +675,7 @@ function handleRaise() {
     return;
   }
 
+  queueMoneySound('pickup');
   applyBet(getPendingRaiseAmount(player));
 }
 
@@ -677,6 +695,7 @@ function handleCall() {
     return;
   }
 
+  queueMoneySound('pickup');
   applyBet(amountToCall);
 }
 

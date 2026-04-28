@@ -371,7 +371,7 @@ label span,
   .shell {
     min-height: auto;
     min-height: 100vh;
-    align-content: center;
+    align-content: start;
   }
 
   .topbar,
