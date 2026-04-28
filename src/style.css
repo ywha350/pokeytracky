@@ -1,0 +1,382 @@
+:root {
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  color: #f7f4ea;
+  background:
+    radial-gradient(circle at top, rgba(244, 191, 117, 0.18), transparent 30%),
+    linear-gradient(180deg, #143728 0%, #0a1c16 100%);
+  line-height: 1.4;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  --card: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.12);
+  --accent: #f4bf75;
+  --accent-strong: #f0a43d;
+  --danger: #c95a52;
+  --text-soft: rgba(247, 244, 234, 0.7);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  cursor: pointer;
+}
+
+input {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: rgba(8, 13, 11, 0.35);
+  color: #fff;
+  border-radius: 12px;
+  padding: 0.65rem 0.8rem;
+}
+
+#app {
+  width: 100%;
+  min-height: 100vh;
+}
+
+.shell {
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0.75rem;
+  display: grid;
+  align-content: stretch;
+  gap: 0.75rem;
+}
+
+.topbar,
+.panel,
+.summary-card,
+.player-card {
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.topbar,
+.panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 0.8rem;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.18);
+}
+
+.topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.summary-grid,
+.players {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.summary-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+.summary-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 0.75rem 0.85rem;
+}
+
+.summary-card span,
+label span,
+.stats span,
+.callout {
+  display: block;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+}
+
+.summary-card strong,
+.stats strong {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: clamp(1.05rem, 3vw, 1.45rem);
+  transition: transform 120ms ease, color 120ms ease;
+  transform-origin: left center;
+}
+
+.summary-card strong {
+  font-size: clamp(2rem, 6vw, 3.25rem);
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+}
+
+.value-animating {
+  transform: scale(1.04);
+}
+
+.value-increasing {
+  color: #ff7a7a;
+}
+
+.value-decreasing {
+  color: #79b8ff;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 120px;
+  white-space: nowrap;
+}
+
+.players {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  height: 100%;
+}
+
+.player-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 0.95rem;
+  display: grid;
+  align-content: start;
+  opacity: 0.48;
+}
+
+.player-card.active {
+  opacity: 1;
+  border-color: rgba(244, 191, 117, 0.65);
+  box-shadow: inset 0 0 0 1px rgba(244, 191, 117, 0.25);
+}
+
+.player-card.showdown {
+  opacity: 1;
+}
+
+.player-card.pickable {
+  cursor: pointer;
+}
+
+.player-card.folded {
+  opacity: 0.28;
+}
+
+.player-title {
+  margin: 0 0 0.65rem;
+  font-size: 1rem;
+  line-height: 1.1;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.9fr);
+  gap: 0.9rem;
+  margin-top: 0.55rem;
+  align-items: end;
+}
+
+.stat-block {
+  min-width: 0;
+}
+
+.stat-block span,
+.stat-block strong {
+  margin-top: 0;
+}
+
+.stat-block span {
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.stat-block-stack {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.stat-block-stack strong {
+  font-size: clamp(2.6rem, 9vw, 4.25rem);
+  line-height: 0.92;
+  letter-spacing: -0.05em;
+}
+
+.stat-block-street {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 0.3rem;
+  padding-bottom: 0.2rem;
+}
+
+.stat-block-street strong {
+  font-size: clamp(1.1rem, 3vw, 1.55rem);
+  line-height: 1;
+}
+
+.action-button,
+.secondary-button {
+  min-height: 46px;
+  border-radius: 14px;
+  padding: 0.7rem 0.85rem;
+  color: #fff;
+  transition: transform 140ms ease, background 140ms ease, opacity 140ms ease;
+}
+
+.action-button {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.action-button.primary {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+  color: #1d1408;
+  font-weight: 700;
+}
+
+.action-button.danger {
+  background: rgba(201, 90, 82, 0.9);
+}
+
+.chip-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.chip-button {
+  min-height: 56px;
+  width: 100%;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border);
+  color: #fff;
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.action-row {
+  margin-top: 0.75rem;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.action-row-raise,
+.action-row-main {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.secondary-button {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+}
+
+.footer-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.game-footer {
+  margin-top: auto;
+  padding-top: 0.1rem;
+  display: flex;
+  justify-content: center;
+}
+
+.footer-reset-button {
+  min-height: auto;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: rgba(247, 244, 234, 0.56);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  transition: color 140ms ease, opacity 140ms ease;
+}
+
+.footer-reset-button:hover,
+.footer-reset-button:focus-visible {
+  color: rgba(247, 244, 234, 0.84);
+}
+
+.footer-reset-button:active {
+  color: rgba(247, 244, 234, 1);
+}
+
+.panel-footer-actions .secondary-button {
+  width: 100%;
+}
+
+.panel-players,
+.panel-actions {
+  overflow: hidden;
+}
+
+.panel-actions {
+  align-self: end;
+}
+
+.action-button:disabled,
+.secondary-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.action-button:not(:disabled):active,
+.secondary-button:not(:disabled):active,
+.chip-button:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+.chip-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 720px) {
+  body {
+    overflow: auto;
+  }
+
+  .shell {
+    min-height: auto;
+    min-height: 100vh;
+    align-content: center;
+  }
+
+  .topbar,
+  .stats {
+    grid-template-columns: 1fr;
+  }
+
+  .chip-row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .chip-button {
+    min-height: 48px;
+  }
+
+}
