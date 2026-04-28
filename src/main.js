@@ -888,7 +888,7 @@ function registerServiceWorker() {
       return;
     }
 
-    navigator.serviceWorker.register('/sw.js').catch(() => {
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {
       // No-op: offline support is optional for local development.
     });
   });

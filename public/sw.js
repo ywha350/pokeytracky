@@ -1,5 +1,5 @@
 const CACHE_NAME = 'pokeytracky-v1';
-const ASSETS = ['/', '/index.html', '/manifest.webmanifest'];
+const ASSETS = ['./', './index.html', './manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)));
