@@ -311,6 +311,21 @@ label span,
   text-transform: uppercase;
 }
 
+.player-name {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.priority-star {
+  flex: 0 0 auto;
+  margin-right: 0.28rem;
+  color: var(--accent);
+  font-size: 1.05em;
+  line-height: 1;
+  text-shadow: 0 0 10px rgba(244, 191, 117, 0.45);
+}
+
 .stats {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.9fr);

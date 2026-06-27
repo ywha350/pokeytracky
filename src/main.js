@@ -215,6 +215,7 @@ function serializeState() {
     settings: { ...state.settings },
     players: state.players.map((player) => ({ ...player })),
     activePlayer: state.activePlayer,
+    priorityPlayer: state.priorityPlayer,
     handOver: state.handOver,
     settlingPot: state.settlingPot,
     lastFullRaiseSize: state.lastFullRaiseSize,
@@ -241,6 +242,10 @@ function hydrateState(snapshot) {
   state.activePlayer = Number.isInteger(snapshot.activePlayer) ? snapshot.activePlayer : 0;
   if (state.activePlayer < 0 || state.activePlayer >= state.players.length) {
     state.activePlayer = 0;
+  }
+  state.priorityPlayer = Number.isInteger(snapshot.priorityPlayer) ? snapshot.priorityPlayer : state.activePlayer;
+  if (state.priorityPlayer < 0 || state.priorityPlayer >= state.players.length) {
+    state.priorityPlayer = state.activePlayer;
   }
   state.handOver = Boolean(snapshot.handOver);
   state.settlingPot = Boolean(snapshot.settlingPot);
@@ -348,6 +353,7 @@ const state = {
     paid: false,
   })),
   activePlayer: 0,
+  priorityPlayer: -1,
   handOver: false,
   settlingPot: false,
   lastFullRaiseSize: 10,
@@ -360,6 +366,17 @@ function getRemaining(player) {
 
 function isPlayerEligible(player) {
   return !player.folded && !player.settled;
+}
+
+function findPlayerFrom(startIndex, predicate) {
+  for (let offset = 0; offset < state.players.length; offset += 1) {
+    const index = (startIndex + offset + state.players.length) % state.players.length;
+    if (predicate(state.players[index])) {
+      return index;
+    }
+  }
+
+  return -1;
 }
 
 function getCurrentBet() {
@@ -587,10 +604,10 @@ function startNextHand() {
     player.settled = false;
     player.paid = false;
   });
-  state.activePlayer = state.players.findIndex((player) => !isAllIn(player));
-  if (state.activePlayer === -1) {
-    state.activePlayer = 0;
-  }
+  const nextPriority = (state.priorityPlayer + 1 + state.players.length) % state.players.length;
+  const firstActionablePlayer = findPlayerFrom(nextPriority, (player) => !isAllIn(player));
+  state.priorityPlayer = firstActionablePlayer === -1 ? nextPriority : firstActionablePlayer;
+  state.activePlayer = state.priorityPlayer;
   state.handOver = false;
   state.settlingPot = false;
   state.lastFullRaiseSize = MIN_OPEN_BET;
@@ -882,12 +899,17 @@ function nextStreet() {
     player.acted = false;
     player.streetBet = 0;
   });
-  state.activePlayer = state.players.findIndex((player) => isPlayerEligible(player) && !isAllIn(player));
-  if (state.activePlayer === -1) {
-    state.activePlayer = state.players.findIndex((player) => isPlayerEligible(player));
+
+  let firstActionablePlayer = findPlayerFrom(
+    state.priorityPlayer,
+    (player) => isPlayerEligible(player) && !isAllIn(player),
+  );
+  if (firstActionablePlayer === -1) {
+    firstActionablePlayer = findPlayerFrom(state.priorityPlayer, (player) => isPlayerEligible(player));
   }
-  if (state.activePlayer === -1) {
-    state.activePlayer = 0;
+  if (firstActionablePlayer !== -1) {
+    state.priorityPlayer = firstActionablePlayer;
+    state.activePlayer = firstActionablePlayer;
   }
   state.lastFullRaiseSize = MIN_OPEN_BET;
   clearPendingRaise();
@@ -906,6 +928,7 @@ function resetGame() {
   }
 
   state.players = state.players.map(() => createPlayer());
+  state.priorityPlayer = -1;
   startNextHand();
   render();
 }
@@ -960,6 +983,7 @@ function openSettings() {
     playerCount: nextPlayerCount,
   });
   state.players = Array.from({ length: state.settings.playerCount }, () => createPlayer());
+  state.priorityPlayer = -1;
   startNextHand();
   render();
 }
@@ -1042,7 +1066,10 @@ function render() {
               return `
                 <article class="player-card player-${index + 1} ${isActive ? 'active' : ''} ${player.folded ? 'folded' : ''} ${player.settled ? 'settled' : ''} ${bettingClosed ? 'showdown' : ''} ${canPickWinner ? 'pickable' : ''}" data-role="player-card" data-player-index="${index}">
                   <h2 class="player-title">
-                    <span>${getPlayerLabel(index)}</span>
+                    <span class="player-name">
+                      ${index === state.priorityPlayer ? '<span class="priority-star" aria-label="Priority" title="Priority">★</span>' : ''}
+                      <span>${getPlayerLabel(index)}</span>
+                    </span>
                     ${player.settled ? `<small>${player.paid ? 'Paid' : 'Out'}</small>` : ''}
                   </h2>
                   <div class="stats">
