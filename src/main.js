@@ -2,6 +2,9 @@
 
 const DEFAULT_ENTRY_FEE = 1;
 const DEFAULT_STARTING_STACK = 200;
+const DEFAULT_PLAYER_COUNT = 2;
+const MIN_PLAYER_COUNT = 2;
+const MAX_PLAYER_COUNT = 4;
 const MIN_OPEN_BET = 1;
 const VALUE_ANIMATION_DURATION = 420;
 const chipOptions = [
@@ -180,7 +183,15 @@ function queueMoneySound(type) {
 }
 
 function createPlayer() {
-  return { stack: state.settings.startingStack, handBet: 0, streetBet: 0, folded: false, acted: false };
+  return {
+    stack: state.settings.startingStack,
+    handBet: 0,
+    streetBet: 0,
+    folded: false,
+    acted: false,
+    settled: false,
+    paid: false,
+  };
 }
 
 function normalizePlayer(player = {}) {
@@ -190,6 +201,8 @@ function normalizePlayer(player = {}) {
     streetBet: Number.isFinite(player.streetBet) ? player.streetBet : 0,
     folded: Boolean(player.folded),
     acted: Boolean(player.acted),
+    settled: Boolean(player.settled),
+    paid: Boolean(player.paid),
   };
 }
 
@@ -203,17 +216,26 @@ function serializeState() {
     players: state.players.map((player) => ({ ...player })),
     activePlayer: state.activePlayer,
     handOver: state.handOver,
+    settlingPot: state.settlingPot,
     lastFullRaiseSize: state.lastFullRaiseSize,
     pendingRaiseChipValues: state.pendingRaiseChips.map((chip) => chip.value),
   };
 }
 
 function hydrateState(snapshot) {
-  if (!snapshot || !Array.isArray(snapshot.players) || snapshot.players.length !== state.players.length) {
+  if (
+    !snapshot ||
+    !Array.isArray(snapshot.players) ||
+    snapshot.players.length < MIN_PLAYER_COUNT ||
+    snapshot.players.length > MAX_PLAYER_COUNT
+  ) {
     return false;
   }
 
-  state.settings = normalizeSettings(snapshot.settings);
+  state.settings = normalizeSettings({
+    ...snapshot.settings,
+    playerCount: snapshot.players.length,
+  });
 
   state.players = snapshot.players.map((player) => normalizePlayer(player));
   state.activePlayer = Number.isInteger(snapshot.activePlayer) ? snapshot.activePlayer : 0;
@@ -221,6 +243,7 @@ function hydrateState(snapshot) {
     state.activePlayer = 0;
   }
   state.handOver = Boolean(snapshot.handOver);
+  state.settlingPot = Boolean(snapshot.settlingPot);
   state.lastFullRaiseSize = Number.isFinite(snapshot.lastFullRaiseSize) ? snapshot.lastFullRaiseSize : MIN_OPEN_BET;
   state.pendingRaiseChips = Array.isArray(snapshot.pendingRaiseChipValues)
     ? snapshot.pendingRaiseChipValues.map((value) => getChipOptionByValue(value)).filter(Boolean)
@@ -302,21 +325,31 @@ function queuePersistGameState() {
 function normalizeSettings(settings = {}) {
   const startingStack = Number.isFinite(settings.startingStack) ? Math.max(1, Math.floor(settings.startingStack)) : DEFAULT_STARTING_STACK;
   const entryFee = Number.isFinite(settings.entryFee) ? Math.max(0, Math.floor(settings.entryFee)) : DEFAULT_ENTRY_FEE;
+  const playerCount = Number.isFinite(settings.playerCount)
+    ? Math.min(MAX_PLAYER_COUNT, Math.max(MIN_PLAYER_COUNT, Math.floor(settings.playerCount)))
+    : DEFAULT_PLAYER_COUNT;
 
   return {
     startingStack,
     entryFee: Math.min(entryFee, startingStack),
+    playerCount,
   };
 }
 
 const state = {
   settings: normalizeSettings(),
-  players: [
-    { stack: DEFAULT_STARTING_STACK, handBet: 0, streetBet: 0, folded: false, acted: false },
-    { stack: DEFAULT_STARTING_STACK, handBet: 0, streetBet: 0, folded: false, acted: false },
-  ],
+  players: Array.from({ length: DEFAULT_PLAYER_COUNT }, () => ({
+    stack: DEFAULT_STARTING_STACK,
+    handBet: 0,
+    streetBet: 0,
+    folded: false,
+    acted: false,
+    settled: false,
+    paid: false,
+  })),
   activePlayer: 0,
   handOver: false,
+  settlingPot: false,
   lastFullRaiseSize: 10,
   pendingRaiseChips: [],
 };
@@ -325,8 +358,12 @@ function getRemaining(player) {
   return Math.max(player.stack - player.handBet, 0);
 }
 
+function isPlayerEligible(player) {
+  return !player.folded && !player.settled;
+}
+
 function getCurrentBet() {
-  return Math.max(...state.players.map((player) => player.streetBet));
+  return Math.max(0, ...state.players.filter((player) => isPlayerEligible(player)).map((player) => player.streetBet));
 }
 
 function getPot() {
@@ -360,12 +397,8 @@ function getPendingRaiseAmount(player) {
   return getMinimumRaiseAmount(player) + getSelectedRaiseAmount();
 }
 
-function getPendingRaiseTo(player) {
-  return player.streetBet + getPendingRaiseAmount(player);
-}
-
 function isAllIn(player) {
-  return getRemaining(player) === 0 && player.handBet > 0;
+  return getRemaining(player) === 0;
 }
 
 function formatNumber(value) {
@@ -477,18 +510,40 @@ function clearPendingRaise() {
   state.pendingRaiseChips = [];
 }
 
-function canSubmitRaise(player) {
-  const pendingAmount = getPendingRaiseAmount(player);
+function isShortAllInRaise(player) {
+  const remaining = getRemaining(player);
+  const callAmount = getNeedToCall(player);
 
-  return pendingAmount > getNeedToCall(player) && pendingAmount <= getRemaining(player);
+  return !player.acted && remaining > callAmount && remaining < getMinimumRaiseAmount(player);
 }
 
-function canAdvanceStreet() {
-  if (state.handOver) {
+function getRaiseActionAmount(player) {
+  if (isShortAllInRaise(player)) {
+    return getRemaining(player);
+  }
+
+  return getPendingRaiseAmount(player);
+}
+
+function canSubmitRaise(player) {
+  if (!isPlayerEligible(player) || player.acted) {
     return false;
   }
 
-  const activePlayers = state.players.filter((player) => !player.folded);
+  const raiseAmount = getRaiseActionAmount(player);
+  return raiseAmount > getNeedToCall(player) && raiseAmount <= getRemaining(player);
+}
+
+function canAddRaiseChips(player) {
+  return canSubmitRaise(player) && !isShortAllInRaise(player);
+}
+
+function canAdvanceStreet() {
+  if (state.handOver || state.settlingPot) {
+    return false;
+  }
+
+  const activePlayers = state.players.filter((player) => isPlayerEligible(player));
   if (activePlayers.length <= 1) {
     return false;
   }
@@ -509,7 +564,7 @@ function canAdvanceStreet() {
 }
 
 function isBettingClosed() {
-  return state.handOver || canAdvanceStreet();
+  return state.handOver || state.settlingPot || canAdvanceStreet();
 }
 
 function getPostedAnte(player) {
@@ -517,7 +572,7 @@ function getPostedAnte(player) {
 }
 
 function maybeEndHand() {
-  const playersInHand = state.players.filter((player) => !player.folded);
+  const playersInHand = state.players.filter((player) => isPlayerEligible(player));
   if (playersInHand.length <= 1) {
     state.handOver = true;
   }
@@ -529,30 +584,113 @@ function startNextHand() {
     player.streetBet = 0;
     player.folded = false;
     player.acted = false;
+    player.settled = false;
+    player.paid = false;
   });
-  state.activePlayer = 0;
+  state.activePlayer = state.players.findIndex((player) => !isAllIn(player));
+  if (state.activePlayer === -1) {
+    state.activePlayer = 0;
+  }
   state.handOver = false;
+  state.settlingPot = false;
   state.lastFullRaiseSize = MIN_OPEN_BET;
   clearPendingRaise();
 }
 
-function awardPotToWinner(winnerIndex) {
-  const pot = getPot();
+function preparePotSettlement() {
+  state.settlingPot = true;
   state.players.forEach((player) => {
-    player.stack -= player.handBet;
+    player.streetBet = 0;
   });
-  state.players[winnerIndex].stack += pot;
+  state.lastFullRaiseSize = MIN_OPEN_BET;
+  clearPendingRaise();
+}
+
+function collectContributionsUpTo(maximumContribution) {
+  let collected = 0;
+
+  state.players.forEach((player) => {
+    const contribution = Math.min(player.handBet, maximumContribution);
+    player.stack -= contribution;
+    player.handBet -= contribution;
+    collected += contribution;
+  });
+
+  return collected;
+}
+
+function settleUncontestedPot() {
+  const eligiblePlayers = state.players
+    .map((player, index) => ({ player, index }))
+    .filter(({ player }) => isPlayerEligible(player) && player.handBet > 0);
+
+  if (eligiblePlayers.length > 1) {
+    return false;
+  }
+
+  if (eligiblePlayers.length === 1) {
+    const winner = eligiblePlayers[0].player;
+    let award = 0;
+
+    state.players.forEach((player) => {
+      player.stack -= player.handBet;
+      award += player.handBet;
+      player.handBet = 0;
+    });
+
+    winner.stack += award;
+    winner.settled = true;
+    winner.paid = true;
+    return true;
+  }
+
+  state.players.forEach((player) => {
+    player.handBet = 0;
+  });
+  return true;
+}
+
+function awardPotToWinner(winnerIndex) {
+  const winner = state.players[winnerIndex];
+  if (!winner || !isPlayerEligible(winner) || winner.handBet <= 0) {
+    return;
+  }
+
+  preparePotSettlement();
+  const winnerContribution = winner.handBet;
+  const award = collectContributionsUpTo(winnerContribution);
+  winner.stack += award;
+  winner.settled = true;
+  winner.paid = true;
+
+  state.players.forEach((player) => {
+    if (isPlayerEligible(player) && player.handBet === 0) {
+      player.settled = true;
+    }
+  });
+
+  settleUncontestedPot();
   playWinnerSound();
-  startNextHand();
+
+  if (getPot() === 0) {
+    startNextHand();
+  }
+
   render();
 }
 
 function promptForWinner() {
   const eligiblePlayers = state.players
     .map((player, index) => ({ player, index }))
-    .filter(({ player }) => !player.folded);
+    .filter(({ player }) => isPlayerEligible(player));
 
   if (eligiblePlayers.length === 0) {
+    return;
+  }
+
+  if (getPot() === 0) {
+    startNextHand();
+    render();
     return;
   }
 
@@ -579,7 +717,7 @@ function promptForWinner() {
 
 function handlePlayerCardClick(index) {
   const player = state.players[index];
-  if (!player || player.folded || !isBettingClosed()) {
+  if (!player || !isPlayerEligible(player) || player.handBet <= 0 || !isBettingClosed()) {
     return;
   }
 
@@ -599,7 +737,7 @@ function moveTurn() {
     const nextPlayer = (state.activePlayer + offset) % state.players.length;
     const player = state.players[nextPlayer];
 
-    if (!player.folded && !isAllIn(player)) {
+    if (isPlayerEligible(player) && !isAllIn(player)) {
       state.activePlayer = nextPlayer;
       return;
     }
@@ -608,7 +746,7 @@ function moveTurn() {
 
 function applyBet(amount) {
   const player = state.players[state.activePlayer];
-  if (player.folded || state.handOver) {
+  if (!isPlayerEligible(player) || state.handOver || state.settlingPot) {
     return;
   }
 
@@ -643,7 +781,9 @@ function applyBet(amount) {
   if (isRaise && raiseSize >= state.lastFullRaiseSize) {
     state.lastFullRaiseSize = raiseSize;
     state.players.forEach((item, index) => {
-      item.acted = index === state.activePlayer;
+      if (isPlayerEligible(item)) {
+        item.acted = index === state.activePlayer;
+      }
     });
   } else if (callAmount > 0 && player.streetBet === previousCurrentBet) {
     player.acted = true;
@@ -655,7 +795,7 @@ function applyBet(amount) {
 
 function addRaiseChip(chipIndex) {
   const player = state.players[state.activePlayer];
-  if (player.folded || isBettingClosed()) {
+  if (!isPlayerEligible(player) || isBettingClosed() || !canAddRaiseChips(player)) {
     return;
   }
 
@@ -685,17 +825,17 @@ function clearRaiseSelection() {
 
 function handleRaise() {
   const player = state.players[state.activePlayer];
-  if (player.folded || isBettingClosed() || !canSubmitRaise(player)) {
+  if (!isPlayerEligible(player) || isBettingClosed() || !canSubmitRaise(player)) {
     return;
   }
 
   queueMoneySound('pickup');
-  applyBet(getPendingRaiseAmount(player));
+  applyBet(getRaiseActionAmount(player));
 }
 
 function handleCall() {
   const player = state.players[state.activePlayer];
-  if (player.folded || isBettingClosed()) {
+  if (!isPlayerEligible(player) || isBettingClosed()) {
     return;
   }
 
@@ -715,7 +855,7 @@ function handleCall() {
 
 function handleFold() {
   const player = state.players[state.activePlayer];
-  if (player.folded || isBettingClosed()) {
+  if (!isPlayerEligible(player) || isBettingClosed()) {
     return;
   }
 
@@ -733,15 +873,19 @@ function handleFold() {
 }
 
 function nextStreet() {
-  if (!canAdvanceStreet()) {
+  if (!state.settlingPot && !canAdvanceStreet()) {
     return;
   }
 
+  state.settlingPot = false;
   state.players.forEach((player) => {
     player.acted = false;
     player.streetBet = 0;
   });
-  state.activePlayer = state.players.findIndex((player) => !player.folded && !isAllIn(player));
+  state.activePlayer = state.players.findIndex((player) => isPlayerEligible(player) && !isAllIn(player));
+  if (state.activePlayer === -1) {
+    state.activePlayer = state.players.findIndex((player) => isPlayerEligible(player));
+  }
   if (state.activePlayer === -1) {
     state.activePlayer = 0;
   }
@@ -756,7 +900,7 @@ function resetHand() {
 }
 
 function resetGame() {
-  const shouldReset = window.confirm('Reset the entire game and both stacks?');
+  const shouldReset = window.confirm('Reset the entire game and all player stacks?');
   if (!shouldReset) {
     return;
   }
@@ -766,15 +910,18 @@ function resetGame() {
   render();
 }
 
-function promptForPositiveWholeNumber(message, initialValue, minimum = 0) {
+function promptForPositiveWholeNumber(message, initialValue, minimum = 0, maximum = Infinity) {
   const input = window.prompt(message, `${initialValue}`);
   if (input === null) {
     return null;
   }
 
   const value = Number(input.trim());
-  if (!Number.isInteger(value) || value < minimum) {
-    window.alert(`Enter a whole number of at least ${minimum}.`);
+  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+    const rangeMessage = Number.isFinite(maximum)
+      ? `between ${minimum} and ${maximum}`
+      : `of at least ${minimum}`;
+    window.alert(`Enter a whole number ${rangeMessage}.`);
     return null;
   }
 
@@ -782,6 +929,16 @@ function promptForPositiveWholeNumber(message, initialValue, minimum = 0) {
 }
 
 function openSettings() {
+  const nextPlayerCount = promptForPositiveWholeNumber(
+    'Number of players (2-4)',
+    state.settings.playerCount,
+    MIN_PLAYER_COUNT,
+    MAX_PLAYER_COUNT,
+  );
+  if (nextPlayerCount === null) {
+    return;
+  }
+
   const nextStartingStack = promptForPositiveWholeNumber('Starting stack per player', state.settings.startingStack, 1);
   if (nextStartingStack === null) {
     return;
@@ -800,8 +957,9 @@ function openSettings() {
   state.settings = normalizeSettings({
     startingStack: nextStartingStack,
     entryFee: nextEntryFee,
+    playerCount: nextPlayerCount,
   });
-  state.players = state.players.map(() => createPlayer());
+  state.players = Array.from({ length: state.settings.playerCount }, () => createPlayer());
   startNextHand();
   render();
 }
@@ -811,13 +969,28 @@ function render() {
   const currentBet = getCurrentBet();
   const pot = getPot();
   const activePlayer = state.players[state.activePlayer];
-  const pendingRaiseAmount = getPendingRaiseAmount(activePlayer);
-  const pendingRaiseTo = getPendingRaiseTo(activePlayer);
+  const shortAllInRaise = isShortAllInRaise(activePlayer);
+  const raiseActionAmount = getRaiseActionAmount(activePlayer);
+  const raiseActionTo = activePlayer.streetBet + raiseActionAmount;
   const bettingClosed = isBettingClosed();
   const raiseEnabled = canSubmitRaise(activePlayer);
+  const raiseChipsEnabled = canAddRaiseChips(activePlayer) && !bettingClosed;
   const callAmount = getNeedToCall(activePlayer);
-  const raiseLabel = currentBet === 0 ? `Bet ${formatNumber(pendingRaiseAmount)}` : `Raise To ${formatNumber(pendingRaiseTo)}`;
-  const callLabel = callAmount === 0 ? 'Check' : `Call ${formatNumber(callAmount)}`;
+  const callPayment = Math.min(callAmount, getRemaining(activePlayer));
+  const raiseLabel = shortAllInRaise
+    ? `All-in ${formatNumber(raiseActionAmount)}`
+    : currentBet === 0
+      ? `Bet ${formatNumber(raiseActionAmount)}`
+      : `Raise To ${formatNumber(raiseActionTo)}`;
+  const callLabel =
+    callAmount === 0
+      ? 'Check'
+      : callPayment < callAmount
+        ? `All-in ${formatNumber(callPayment)}`
+        : `Call ${formatNumber(callAmount)}`;
+  const tieEnabled = state.settlingPot || canAdvanceStreet();
+  const winnerSelection = bettingClosed && pot > 0;
+  const winnerMessage = state.settlingPot ? 'Next Winner' : 'Pick Winner';
   const animatedPot = getAnimatedValue('pot', pot);
   const animatedCurrentBet = getAnimatedValue('currentBet', currentBet);
 
@@ -837,17 +1010,41 @@ function render() {
         <div class="topbar-actions"></div>
       </section>
 
-      <section class="panel panel-players">
-        <div class="players">
+      <section class="panel panel-players ${state.players.length >= 3 ? 'panel-players-fixed' : ''}">
+        ${
+          state.players.length >= 3
+            ? `
+              <div class="player-panel-sizer" aria-hidden="true">
+                <article class="player-card">
+                  <h2 class="player-title">Player</h2>
+                  <div class="stats">
+                    <div class="stat-block stat-block-stack">
+                      <span>Stack</span>
+                      <strong>${formatNumber(state.settings.startingStack)}</strong>
+                    </div>
+                    <div class="stat-block stat-block-street">
+                      <span>Street</span>
+                      <strong>0</strong>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            `
+            : ''
+        }
+        <div class="players players-${state.players.length}">
           ${state.players
             .map((player, index) => {
-              const isActive = index === state.activePlayer && !bettingClosed && !player.folded;
-              const canPickWinner = bettingClosed && !player.folded;
+              const isActive = index === state.activePlayer && !bettingClosed && isPlayerEligible(player);
+              const canPickWinner = bettingClosed && isPlayerEligible(player) && player.handBet > 0;
               const animatedRemaining = getAnimatedValue(`player-${index}-remaining`, getRemaining(player));
               const animatedStreetBet = getAnimatedValue(`player-${index}-street`, player.streetBet);
               return `
-                <article class="player-card ${isActive ? 'active' : ''} ${player.folded ? 'folded' : ''} ${bettingClosed ? 'showdown' : ''} ${canPickWinner ? 'pickable' : ''}" data-role="player-card" data-player-index="${index}">
-                  <h2 class="player-title">${getPlayerLabel(index)}</h2>
+                <article class="player-card player-${index + 1} ${isActive ? 'active' : ''} ${player.folded ? 'folded' : ''} ${player.settled ? 'settled' : ''} ${bettingClosed ? 'showdown' : ''} ${canPickWinner ? 'pickable' : ''}" data-role="player-card" data-player-index="${index}">
+                  <h2 class="player-title">
+                    <span>${getPlayerLabel(index)}</span>
+                    ${player.settled ? `<small>${player.paid ? 'Paid' : 'Out'}</small>` : ''}
+                  </h2>
                   <div class="stats">
                     <div class="stat-block stat-block-stack">
                       <span>Stack</span>
@@ -865,31 +1062,34 @@ function render() {
         </div>
       </section>
 
-      <section class="panel panel-actions">
-        <div class="chip-row">
-          ${chipOptions
-            .map(
-              (chip, index) => `
-                <button class="chip-button" data-role="chip" data-chip-index="${index}" ${bettingClosed ? 'disabled' : ''}>
-                  ${chip.label}
-                </button>
-              `,
-            )
-            .join('')}
+      <section class="panel panel-actions ${winnerSelection ? 'winner-selection' : ''}">
+        <div class="action-controls" ${winnerSelection ? 'aria-hidden="true"' : ''}>
+          <div class="chip-row">
+            ${chipOptions
+              .map(
+                (chip, index) => `
+                  <button class="chip-button" data-role="chip" data-chip-index="${index}" ${raiseChipsEnabled ? '' : 'disabled'}>
+                    ${chip.label}
+                  </button>
+                `,
+              )
+              .join('')}
+          </div>
+          <div class="action-row action-row-raise">
+            <button class="action-button" data-role="clear-raise" ${state.pendingRaiseChips.length === 0 || bettingClosed ? 'disabled' : ''}>Clear</button>
+            <button class="action-button primary" data-role="raise" ${raiseEnabled && !bettingClosed ? '' : 'disabled'}>${raiseLabel}</button>
+          </div>
+          <div class="action-row action-row-main">
+            <button class="action-button primary" data-role="call" ${bettingClosed ? 'disabled' : ''}>${callLabel}</button>
+            <button class="action-button danger" data-role="fold" ${bettingClosed ? 'disabled' : ''}>Fold</button>
+          </div>
         </div>
-        <div class="action-row action-row-raise">
-          <button class="action-button" data-role="clear-raise" ${state.pendingRaiseChips.length === 0 || bettingClosed ? 'disabled' : ''}>Clear</button>
-          <button class="action-button primary" data-role="raise" ${raiseEnabled && !bettingClosed ? '' : 'disabled'}>${raiseLabel}</button>
-        </div>
-        <div class="action-row action-row-main">
-          <button class="action-button primary" data-role="call" ${bettingClosed ? 'disabled' : ''}>${callLabel}</button>
-          <button class="action-button danger" data-role="fold" ${bettingClosed ? 'disabled' : ''}>Fold</button>
-        </div>
+        ${winnerSelection ? `<div class="winner-message">${winnerMessage}</div>` : ''}
       </section>
 
       <section class="panel panel-footer-actions">
         <div class="footer-actions">
-          <button class="secondary-button" id="next-street" ${canAdvanceStreet() ? '' : 'disabled'}>Tie</button>
+          <button class="secondary-button" id="next-street" ${tieEnabled ? '' : 'disabled'}>Tie</button>
           <button class="secondary-button" id="reset-hand">Reset</button>
         </div>
       </section>
